@@ -40,26 +40,54 @@ jobs:
       shell: powershell
       run: |
         $src = "kernelmode.vcxproj"
-        if (Test-Path $src) {
-            $content = Get-Content $src -Raw
-            
-            Write-Host "Création du projet Loader (.exe)..."
-            $loaderContent = $content -replace '<ClCompile Include="moderninjector.cpp" />', ''
-            $loaderContent = $loaderContent -replace '<ClCompile Include="test_client.cpp" />', ''
-            Set-Content -Path "build_loader.vcxproj" -Value $loaderContent
-            
-            Write-Host "Création du projet Driver (.sys)..."
-            $driverContent = $content -replace 'moderninjector.cpp', 'modern_injector.cpp'
-            $driverContent = $driverContent -replace '<ClCompile Include="loader.cpp" />', ''
-            $driverContent = $driverContent -replace '<ClCompile Include="test_client.cpp" />', ''
-            $driverContent = $driverContent -replace '<ConfigurationType>Application</ConfigurationType>', '<ConfigurationType>Driver</ConfigurationType>'
-            $driverContent = $driverContent -replace '<SubSystem>Console</SubSystem>', '<SubSystem>Native</SubSystem>'
-            $driverContent = $driverContent -replace '<PlatformToolset>v143</PlatformToolset>', '<PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>'
-            Set-Content -Path "build_driver.vcxproj" -Value $driverContent
-        } else {
-            Write-Error "Fichier $src introuvable !"
-            exit 1
-        }
+        
+        Write-Host "1. Création du projet Loader (.exe) par patching..."
+        $content = Get-Content $src -Raw
+        $loaderContent = $content -replace '<ClCompile Include="moderninjector.cpp" />', ''
+        $loaderContent = $loaderContent -replace '<ClCompile Include="test_client.cpp" />', ''
+        Set-Content -Path "build_loader.vcxproj" -Value $loaderContent
+        
+        Write-Host "2. Création d'un projet Driver (.sys) parfait de zéro..."
+        $driverXml = @"
+        <?xml version="1.0" encoding="utf-8"?>
+        <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+          <ItemGroup Label="ProjectConfigurations">
+            <ProjectConfiguration Include="Release|x64">
+              <Configuration>Release</Configuration>
+              <Platform>x64</Platform>
+            </ProjectConfiguration>
+          </ItemGroup>
+          <PropertyGroup Label="Globals">
+            <ProjectGuid>{88888888-4444-4444-4444-123456789012}</ProjectGuid>
+            <RootNamespace>modern_injector</RootNamespace>
+            <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+          </PropertyGroup>
+          <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+          <PropertyGroup>
+            <ConfigurationType>Driver</ConfigurationType>
+            <DriverType>WDM</DriverType>
+            <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+            <SpectreMitigation>false</SpectreMitigation>
+          </PropertyGroup>
+          <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.props" />
+          <ItemDefinitionGroup>
+            <ClCompile>
+              <TreatWarningAsError>false</TreatWarningAsError>
+              <BufferSecurityCheck>false</BufferSecurityCheck>
+            </ClCompile>
+            <Link>
+              <EntryPointSymbol>DriverEntry</EntryPointSymbol>
+            </Link>
+          </ItemDefinitionGroup>
+          <ItemGroup>
+            <ClCompile Include="modern_injector.cpp" />
+          </ItemGroup>
+          <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.targets" />
+        </Project>
+        "@
+        
+        Set-Content -Path "build_driver.vcxproj" -Value $driverXml
+        Write-Host "Génération terminée !"
 
     - name: Build Loader (.exe)
       run: msbuild build_loader.vcxproj /p:Configuration=Release /p:Platform=x64
