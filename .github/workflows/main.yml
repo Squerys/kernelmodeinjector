@@ -14,11 +14,28 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    - name: Download and Install WDK (via WinGet)
+    - name: Install WDK and Visual Studio Extension
       shell: powershell
       run: |
-        Write-Host "Installation du Windows Driver Kit..."
+        Write-Host "1. Installation du WDK..."
         winget install --id Microsoft.WindowsWDK.10.0.22621 --exact --silent --accept-package-agreements --accept-source-agreements
+        
+        Write-Host "2. Recherche du VSIXInstaller et de l'extension WDK..."
+        # Trouve l'outil d'installation d'extensions de Visual Studio
+        $vsixInstaller = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find **\VSIXInstaller.exe | Select-Object -First 1
+        # Trouve le fichier d'extension WDK téléchargé par winget
+        $wdkVsix = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix\VS2022" -Filter "WDK.vsix" -Recurse | Select-Object -First 1
+        
+        if ($vsixInstaller -and $wdkVsix) {
+            Write-Host "3. Injection de l'extension WDK dans Visual Studio (patiente un instant)..."
+            # Installation silencieuse de l'extension
+            $process = Start-Process -FilePath $vsixInstaller -ArgumentList "/q", "/admin", "/quiet", "`"$($wdkVsix.FullName)`"" -Wait -PassThru
+            Write-Host "VSIXInstaller terminé avec le code : $($process.ExitCode)"
+        } else {
+            Write-Error "Erreur : VSIXInstaller ou WDK.vsix introuvable !"
+            exit 1
+        }
+
     - name: Split and Patch Projects
       shell: powershell
       run: |
@@ -26,27 +43,19 @@ jobs:
         if (Test-Path $src) {
             $content = Get-Content $src -Raw
             
-            Write-Host "1. Création du projet Loader (.exe)..."
+            Write-Host "Création du projet Loader (.exe)..."
             $loaderContent = $content -replace '<ClCompile Include="moderninjector.cpp" />', ''
             $loaderContent = $loaderContent -replace '<ClCompile Include="test_client.cpp" />', ''
             Set-Content -Path "build_loader.vcxproj" -Value $loaderContent
             
-            Write-Host "2. Création du projet Driver (.sys)..."
-            # Correction du nom de fichier
+            Write-Host "Création du projet Driver (.sys)..."
             $driverContent = $content -replace 'moderninjector.cpp', 'modern_injector.cpp'
-            
-            # Nettoyage des fichiers Ring 3
             $driverContent = $driverContent -replace '<ClCompile Include="loader.cpp" />', ''
             $driverContent = $driverContent -replace '<ClCompile Include="test_client.cpp" />', ''
-            
-            # Transformation en vrai pilote noyau (Toolset WDK)
             $driverContent = $driverContent -replace '<ConfigurationType>Application</ConfigurationType>', '<ConfigurationType>Driver</ConfigurationType>'
             $driverContent = $driverContent -replace '<SubSystem>Console</SubSystem>', '<SubSystem>Native</SubSystem>'
             $driverContent = $driverContent -replace '<PlatformToolset>v143</PlatformToolset>', '<PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>'
-            
             Set-Content -Path "build_driver.vcxproj" -Value $driverContent
-            
-            Write-Host "Patching terminé avec succès !"
         } else {
             Write-Error "Fichier $src introuvable !"
             exit 1
