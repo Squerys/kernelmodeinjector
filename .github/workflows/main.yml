@@ -1,7 +1,7 @@
 name: Build Kernel Injector
 
 on:
-  workflow_dispatch: # Permet de lancer la compilation manuellement
+  workflow_dispatch:
 
 jobs:
   build:
@@ -9,29 +9,42 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4 # Mis à jour en v4
+      uses: actions/checkout@v4
 
     - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2 # Mis à jour en v2
+      uses: microsoft/setup-msbuild@v2
 
     - name: Download and Install WDK (via WinGet)
       shell: powershell
       run: |
-        # On installe directement le paquet WDK officiel pour Windows 11 / Server 2022
         winget install --id Microsoft.WindowsWDK.10.0.22621 --exact --silent --accept-package-agreements --accept-source-agreements
-        
-        # Le script attend automatiquement la fin de l'installation silencieuse
 
-    - name: Build User-Mode Loader (.exe)
-      # Assurez-vous que le chemin vers le fichier .vcxproj correspond à la structure du dépôt
-      run: msbuild loader/loader.vcxproj /p:Configuration=Release /p:Platform=x64
+    
+    - name: Patch vcxproj to output a Driver (.sys)
+      shell: powershell
+      run: |
+        $projFile = "kernelmode.vcxproj"
+        if (Test-Path $projFile) {
+            Write-Host "Patching $projFile pour forcer la compilation en .sys..."
+            $content = Get-Content $projFile -Raw
+            
+            # On remplace 'Application' par 'Driver' pour toutes les configurations
+            $content = $content -replace '<ConfigurationType>Application</ConfigurationType>', '<ConfigurationType>Driver</ConfigurationType>'
+            
+            # On change le SubSystem pour qu'il soit compatible avec le noyau
+            $content = $content -replace '<SubSystem>Console</SubSystem>', '<SubSystem>Native</SubSystem>'
+            
+            Set-Content -Path $projFile -Value $content
+            Write-Host "Patch réussi !"
+        } else {
+            Write-Error "Fichier $projFile introuvable !"
+        }
 
-    - name: Build Kernel Driver (.sys)
-      # Assurez-vous que le chemin vers le fichier .vcxproj correspond à la structure du dépôt
-      run: msbuild driver/driver.vcxproj /p:Configuration=Release /p:Platform=x64
+    - name: Build Solution
+      run: msbuild kernelmode.sln /p:Configuration=Release /p:Platform=x64
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4 # Mis à jour en v4
+      uses: actions/upload-artifact@v4
       with:
         name: Compiled-Injector
         path: |
