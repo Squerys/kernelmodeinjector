@@ -1,4 +1,4 @@
-name: Build Kernel Injector (SYS and EXE)
+name: Build Kernel Injector (eWDK Edition)
 
 on:
   workflow_dispatch:
@@ -11,43 +11,21 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup MSBuild
+    - name: Setup MSBuild (For User-Mode Loader)
       uses: microsoft/setup-msbuild@v2
-
-    - name: Install WDK and Visual Studio Extension
-      shell: powershell
-      run: |
-        Write-Host "1. Installation du WDK..."
-        winget install --id Microsoft.WindowsWDK.10.0.22621 --exact --silent --accept-package-agreements --accept-source-agreements
-        
-        Write-Host "2. Recherche du VSIXInstaller et de l'extension WDK..."
-        # Trouve l'outil d'installation d'extensions de Visual Studio
-        $vsixInstaller = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find **\VSIXInstaller.exe | Select-Object -First 1
-        # Trouve le fichier d'extension WDK téléchargé par winget
-        $wdkVsix = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix\VS2022" -Filter "WDK.vsix" -Recurse | Select-Object -First 1
-        
-        if ($vsixInstaller -and $wdkVsix) {
-            Write-Host "3. Injection de l'extension WDK dans Visual Studio (patiente un instant)..."
-            # Installation silencieuse de l'extension
-            $process = Start-Process -FilePath $vsixInstaller -ArgumentList "/q", "/admin", "/quiet", "`"$($wdkVsix.FullName)`"" -Wait -PassThru
-            Write-Host "VSIXInstaller terminé avec le code : $($process.ExitCode)"
-        } else {
-            Write-Error "Erreur : VSIXInstaller ou WDK.vsix introuvable !"
-            exit 1
-        }
 
     - name: Split and Patch Projects
       shell: powershell
       run: |
         $src = "kernelmode.vcxproj"
         
-        Write-Host "1. Création du projet Loader (.exe) par patching..."
+        Write-Host "1. Création du projet Loader (.exe)..."
         $content = Get-Content $src -Raw
         $loaderContent = $content -replace '<ClCompile Include="moderninjector.cpp" />', ''
         $loaderContent = $loaderContent -replace '<ClCompile Include="test_client.cpp" />', ''
         Set-Content -Path "build_loader.vcxproj" -Value $loaderContent
         
-        Write-Host "2. Création d'un projet Driver (.sys) parfait de zéro..."
+        Write-Host "2. Création d'un projet Driver (.sys) parfait..."
         $driverXml = @"
         <?xml version="1.0" encoding="utf-8"?>
         <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
@@ -60,20 +38,18 @@ jobs:
           <PropertyGroup Label="Globals">
             <ProjectGuid>{88888888-4444-4444-4444-123456789012}</ProjectGuid>
             <RootNamespace>modern_injector</RootNamespace>
-            <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+            <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
           </PropertyGroup>
           <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
           <PropertyGroup>
             <ConfigurationType>Driver</ConfigurationType>
-            <DriverType>WDM</DriverType>
             <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
-            <SpectreMitigation>false</SpectreMitigation>
           </PropertyGroup>
           <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.props" />
           <ItemDefinitionGroup>
             <ClCompile>
-              <TreatWarningAsError>false</TreatWarningAsError>
               <BufferSecurityCheck>false</BufferSecurityCheck>
+              <TreatWarningAsError>false</TreatWarningAsError>
             </ClCompile>
             <Link>
               <EntryPointSymbol>DriverEntry</EntryPointSymbol>
@@ -85,15 +61,31 @@ jobs:
           <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.targets" />
         </Project>
         "@
-        
         Set-Content -Path "build_driver.vcxproj" -Value $driverXml
-        Write-Host "Génération terminée !"
 
     - name: Build Loader (.exe)
       run: msbuild build_loader.vcxproj /p:Configuration=Release /p:Platform=x64
 
-    - name: Build Driver (.sys)
-      run: msbuild build_driver.vcxproj /p:Configuration=Release /p:Platform=x64
+    - name: Download and Mount Enterprise WDK (eWDK)
+      shell: powershell
+      run: |
+        Write-Host "Téléchargement de l'eWDK (très rapide sur les serveurs GitHub)..."
+        Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2196224" -OutFile ewdk.iso
+        
+        Write-Host "Montage de l'ISO..."
+        $mount = Mount-DiskImage -ImagePath "$PWD\ewdk.iso" -PassThru
+        $drive = ($mount | Get-Volume).DriveLetter
+        
+        Write-Host "eWDK monté sur le lecteur ${drive}:\"
+        echo "EWDK_DRIVE=$drive" >> $env:GITHUB_ENV
+
+    - name: Build Driver (.sys) using eWDK
+      shell: cmd
+      run: |
+        echo "Initialisation de l'environnement WDK isolé..."
+        call %EWDK_DRIVE%:\BuildEnv\SetupBuildEnv.cmd
+        echo "Compilation du pilote noyau..."
+        msbuild build_driver.vcxproj /p:Configuration=Release /p:Platform=x64
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
