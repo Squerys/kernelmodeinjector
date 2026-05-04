@@ -1,4 +1,4 @@
-name: Build Kernel Injector
+name: Build Kernel Injector (SYS and EXE)
 
 on:
   workflow_dispatch:
@@ -17,36 +17,51 @@ jobs:
     - name: Download and Install WDK (via WinGet)
       shell: powershell
       run: |
+        Write-Host "Installation du Windows Driver Kit..."
         winget install --id Microsoft.WindowsWDK.10.0.22621 --exact --silent --accept-package-agreements --accept-source-agreements
 
-    
-    - name: Patch vcxproj to output a Driver (.sys)
+    - name: Split and Patch Projects
       shell: powershell
       run: |
-        $projFile = "kernelmode.vcxproj"
-        if (Test-Path $projFile) {
-            Write-Host "Patching $projFile pour forcer la compilation en .sys..."
-            $content = Get-Content $projFile -Raw
+        $src = "kernelmode.vcxproj"
+        if (Test-Path $src) {
+            $content = Get-Content $src -Raw
             
-            # On remplace 'Application' par 'Driver' pour toutes les configurations
-            $content = $content -replace '<ConfigurationType>Application</ConfigurationType>', '<ConfigurationType>Driver</ConfigurationType>'
+            Write-Host "1. Création du projet Loader (.exe)..."
+            $loaderContent = $content -replace '<ClCompile Include="moderninjector.cpp" />', ''
+            $loaderContent = $loaderContent -replace '<ClCompile Include="test_client.cpp" />', ''
+            Set-Content -Path "build_loader.vcxproj" -Value $loaderContent
             
-            # On change le SubSystem pour qu'il soit compatible avec le noyau
-            $content = $content -replace '<SubSystem>Console</SubSystem>', '<SubSystem>Native</SubSystem>'
+            Write-Host "2. Création du projet Driver (.sys)..."
+            # CORRECTION DE L'ERREUR DE L'AUTEUR : ajout du tiret du bas
+            $driverContent = $content -replace 'moderninjector.cpp', 'modern_injector.cpp'
             
-            Set-Content -Path $projFile -Value $content
-            Write-Host "Patch réussi !"
+            # Nettoyage des fichiers Ring 3
+            $driverContent = $driverContent -replace '<ClCompile Include="loader.cpp" />', ''
+            $driverContent = $driverContent -replace '<ClCompile Include="test_client.cpp" />', ''
+            
+            # Transformation en pilote noyau
+            $driverContent = $driverContent -replace '<ConfigurationType>Application</ConfigurationType>', '<ConfigurationType>Driver</ConfigurationType>'
+            $driverContent = $driverContent -replace '<SubSystem>Console</SubSystem>', '<SubSystem>Native</SubSystem>'
+            
+            Set-Content -Path "build_driver.vcxproj" -Value $driverContent
+            
+            Write-Host "Patching terminé avec succès !"
         } else {
-            Write-Error "Fichier $projFile introuvable !"
+            Write-Error "Fichier $src introuvable !"
+            exit 1
         }
 
-    - name: Build Solution
-      run: msbuild kernelmode.sln /p:Configuration=Release /p:Platform=x64
+    - name: Build Loader (.exe)
+      run: msbuild build_loader.vcxproj /p:Configuration=Release /p:Platform=x64
+
+    - name: Build Driver (.sys)
+      run: msbuild build_driver.vcxproj /p:Configuration=Release /p:Platform=x64
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: Compiled-Injector
+        name: Complete-Injector-Kit
         path: |
           **\Release\*.exe
           **\Release\*.sys
