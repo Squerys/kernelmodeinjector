@@ -19,7 +19,6 @@ jobs:
       run: |
         Write-Host "Installation du Windows Driver Kit..."
         winget install --id Microsoft.WindowsWDK.10.0.22621 --exact --silent --accept-package-agreements --accept-source-agreements
-
     - name: Split and Patch Projects
       shell: powershell
       run: |
@@ -33,16 +32,17 @@ jobs:
             Set-Content -Path "build_loader.vcxproj" -Value $loaderContent
             
             Write-Host "2. Création du projet Driver (.sys)..."
-            # CORRECTION DE L'ERREUR DE L'AUTEUR : ajout du tiret du bas
+            # Correction du nom de fichier
             $driverContent = $content -replace 'moderninjector.cpp', 'modern_injector.cpp'
             
             # Nettoyage des fichiers Ring 3
             $driverContent = $driverContent -replace '<ClCompile Include="loader.cpp" />', ''
             $driverContent = $driverContent -replace '<ClCompile Include="test_client.cpp" />', ''
             
-            # Transformation en pilote noyau
+            # Transformation en vrai pilote noyau (Toolset WDK)
             $driverContent = $driverContent -replace '<ConfigurationType>Application</ConfigurationType>', '<ConfigurationType>Driver</ConfigurationType>'
             $driverContent = $driverContent -replace '<SubSystem>Console</SubSystem>', '<SubSystem>Native</SubSystem>'
+            $driverContent = $driverContent -replace '<PlatformToolset>v143</PlatformToolset>', '<PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>'
             
             Set-Content -Path "build_driver.vcxproj" -Value $driverContent
             
