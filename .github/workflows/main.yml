@@ -69,14 +69,19 @@ jobs:
     - name: Download and Mount Enterprise WDK (eWDK)
       shell: powershell
       run: |
-        Write-Host "Téléchargement de l'eWDK (très rapide sur les serveurs GitHub)..."
-        Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2196224" -OutFile ewdk.iso
+        Write-Host "Téléchargement du véritable eWDK via cURL (environ 20 Go, patience)..."
+        # Le bon lien Microsoft vers l'ISO de l'eWDK Windows 11 22H2
+        curl.exe -L -o ewdk.iso "https://go.microsoft.com/fwlink/?linkid=2237475"
+        
+        Write-Host "Vérification de la taille du fichier téléchargé :"
+        $sizeGB = (Get-Item ewdk.iso).Length / 1GB
+        Write-Host "$([math]::Round($sizeGB, 2)) Go"
         
         Write-Host "Montage de l'ISO..."
         $mount = Mount-DiskImage -ImagePath "$PWD\ewdk.iso" -PassThru
         $drive = ($mount | Get-Volume).DriveLetter
         
-        Write-Host "eWDK monté sur le lecteur ${drive}:\"
+        Write-Host "eWDK monté avec succès sur le lecteur ${drive}:\"
         echo "EWDK_DRIVE=$drive" >> $env:GITHUB_ENV
 
     - name: Build Driver (.sys) using eWDK
