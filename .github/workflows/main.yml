@@ -9,22 +9,29 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4 # Mis à jour en v4
 
     - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v2 # Mis à jour en v2
 
-    - name: Install Windows Driver Kit (WDK)
-      uses: numworks/setup-wdk@v1 # Une action communautaire pour installer le WDK
-      
+    - name: Download and Install WDK (via WinGet)
+      shell: powershell
+      run: |
+        # On installe directement le paquet WDK officiel pour Windows 11 / Server 2022
+        winget install --id Microsoft.WindowsWDK.10.0.22621 --exact --silent --accept-package-agreements --accept-source-agreements
+        
+        # Le script attend automatiquement la fin de l'installation silencieuse
+
     - name: Build User-Mode Loader (.exe)
-      run: msbuild loader\loader.vcxproj /p:Configuration=Release /p:Platform=x64
+      # Assurez-vous que le chemin vers le fichier .vcxproj correspond à la structure du dépôt
+      run: msbuild loader/loader.vcxproj /p:Configuration=Release /p:Platform=x64
 
     - name: Build Kernel Driver (.sys)
-      run: msbuild driver\driver.vcxproj /p:Configuration=Release /p:Platform=x64
+      # Assurez-vous que le chemin vers le fichier .vcxproj correspond à la structure du dépôt
+      run: msbuild driver/driver.vcxproj /p:Configuration=Release /p:Platform=x64
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 # Mis à jour en v4
       with:
         name: Compiled-Injector
         path: |
